@@ -1,3 +1,5 @@
+import { PlanSegment } from './permit';
+
 export type DoseBand = 'within_admin' | 'above_admin' | 'near_legal' | 'above_legal' | 'invalid';
 export type QualityFlag = 'pending' | 'verified' | 'rejected';
 export type EntryType = 'confirmed' | 'reversal' | 'replacement';
@@ -36,6 +38,7 @@ export interface DoseEvidence {
   corrected_chain_count: number;
   formula: string;
   projection_formula: string;
+  segments: PlanSegment[];
   administrative_limit_msv: number;
   annual_legal_limit_msv: number;
   near_legal_ratio: number;

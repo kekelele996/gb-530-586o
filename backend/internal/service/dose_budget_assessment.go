@@ -353,7 +353,11 @@ func (service *DoseBudgetAssessmentService) calculate(
 	if err != nil {
 		return model.DoseBudgetAssessment{}, BadRequest("invalid_exposure_chain", err.Error())
 	}
-	projection, err := dosebudget.CalculateProjection(summary.DoseMSV, plan.EstimatedRateMSVH, plan.PlannedMinutes)
+	segments, err := decodePlanSegments(plan)
+	if err != nil {
+		return model.DoseBudgetAssessment{}, err
+	}
+	projection, err := dosebudget.CalculateSegmentProjection(summary.DoseMSV, segments)
 	if err != nil {
 		return model.DoseBudgetAssessment{}, BadRequest("invalid_projection", err.Error())
 	}
@@ -366,14 +370,21 @@ func (service *DoseBudgetAssessmentService) calculate(
 		return model.DoseBudgetAssessment{}, BadRequest("invalid_thresholds", err.Error())
 	}
 	controls := []string{}
-	if err := json.Unmarshal([]byte(plan.ControlsJSON), &controls); err != nil {
-		return model.DoseBudgetAssessment{}, Internal("stored plan controls are invalid", err)
+	seenControls := map[string]bool{}
+	for _, segment := range projection.Segments {
+		for _, control := range segment.Controls {
+			key := strings.ToLower(control)
+			if !seenControls[key] {
+				seenControls[key] = true
+				controls = append(controls, control)
+			}
+		}
 	}
 	snapshot := dosebudget.Snapshot{
 		WorkerID: worker.ID, WorkerCode: worker.WorkerCode, WorkerVersion: worker.Version,
 		PlanID: plan.ID, PlanCode: plan.PlanCode, PlanVersion: plan.Version,
-		PeriodStart: period.Start, PeriodEnd: period.End, EstimatedRateMSVH: plan.EstimatedRateMSVH,
-		PlannedMinutes: plan.PlannedMinutes, Controls: controls,
+		PeriodStart: period.Start, PeriodEnd: period.End, EstimatedRateMSVH: projection.TimeWeightedRateMSV,
+		PlannedMinutes: plan.PlannedMinutes, Controls: controls, Segments: projection.Segments,
 		AdministrativeLimitMSV: worker.AdministrativeLimitMSV, LegalLimitMSV: worker.AnnualLimitMSV,
 		NearLegalRatio: service.nearRatio, ThresholdVersion: service.thresholdVersion,
 	}

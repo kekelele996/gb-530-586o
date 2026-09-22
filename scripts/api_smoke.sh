@@ -73,6 +73,11 @@ require_json '.data.original.id > 0 and .data.reversal.dose_msv == -0.4 and .dat
 request "duplicate correction rejected" 409 POST "/exposures/$exposure_id/correct" "$rpo_token" "$(jq -nc --arg at "$occurred_at" '{source_ref:"QA-SRC-530-C2",replacement_dose_msv:0.2,occurred_at:$at,note:"second correction must fail"}')"
 require_json '.error.code == "correction_chain_conflict"' "single immutable successor"
 
+request "reject plan with empty segment controls" 400 POST "/plans" "$planner_token" "$(jq -nc --argjson worker "$worker_id" '{plan_code:"QA-ALARA-530-BAD",worker_id:$worker,work_area:"QA controlled bay",task_category:"Invalid segment",segments:[{dose_rate_msvh:1,minutes:30,controls:[]}]}')"
+request "reject plan over total segment duration" 400 POST "/plans" "$planner_token" "$(jq -nc --argjson worker "$worker_id" '{plan_code:"QA-ALARA-530-LONG",worker_id:$worker,work_area:"QA controlled bay",task_category:"Overlong segment",segments:[{dose_rate_msvh:1,minutes:1400,controls:["time limit"]},{dose_rate_msvh:1,minutes:41,controls:["abort point"]}]}')"
+request "create segmented plan" 201 POST "/plans" "$planner_token" "$(jq -nc --argjson worker "$worker_id" '{plan_code:"QA-ALARA-530-SEG",worker_id:$worker,work_area:"QA controlled bay",task_category:"Segmented fixture check",segments:[{dose_rate_msvh:3,minutes:20,controls:["temporary shielding"]},{dose_rate_msvh:1,minutes:30,controls:["remote handling","abort point"]}]}')"
+require_json '.data.planned_minutes == 50 and (.data.estimated_rate_msvh*100 | round)/100 == 1.8 and (.data.projected_dose_msv*1000 | round)/1000 == 1.5 and (.data.segments | length) == 2' "segment total, weighted rate and per-segment dose"
+
 request "create high projection plan" 201 POST "/plans" "$planner_token" "$(jq -nc --argjson worker "$worker_id" '{plan_code:"QA-ALARA-530-HI",worker_id:$worker,work_area:"QA controlled bay",task_category:"Source fixture check",estimated_rate_msvh:2.0,planned_minutes:45,controls:["temporary shielding","remote handling"]}')"
 plan_id="$(jq -r '.data.id' <<<"$last_body")"
 plan_version="$(jq -r '.data.version' <<<"$last_body")"

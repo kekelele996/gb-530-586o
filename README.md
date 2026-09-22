@@ -46,7 +46,7 @@ docker compose down -v --remove-orphans
 - 人员概况：维护人员编号、授权级别、行政控制值、法规规划限值、统计周期和乐观锁版本。
 - 暴露台账：新记录先进入 `pending`；RPO 核验后才能计入期间累计。
 - 不可变更正：原值禁止覆盖；一次更正事务创建负值 reversal 和新 replacement，完整保留链路。
-- 作业计划：使用统一 mSv/mSv/h 单位维护剂量率、分钟数和具体控制措施。
+- 作业计划：按分段维护剂量率、分钟数和每段具体控制措施，自动汇总总时长、分段剂量和时长加权率。
 - 剂量评估：冻结人员/计划版本、期间记录 ID、公式、阈值版本和控制措施，结果追加写入而非覆盖。
 - 情景比较：对同一人员的多个计划做时间加权投影并比较风险带，不落库、不改变状态。
 - 人工状态机：`draft -> assessed -> pending_rpo_review -> planning_accepted | rejected -> archived`。
@@ -57,7 +57,9 @@ docker compose down -v --remove-orphans
 所有剂量统一使用 `mSv`，剂量率使用 `mSv/h`：
 
 ```text
-计划增量 = estimated_rate_msvh × planned_minutes ÷ 60
+计划增量 = Σ(segment.dose_rate_msvh × segment.minutes ÷ 60)
+总时长 = Σ(segment.minutes)，不得超过 1440 分钟
+时长加权率 = 计划增量 ÷ 总时长 × 60（回写 estimated_rate_msvh）
 投影累计 = 期间已核验剂量合计 + 计划增量
 行政余量 = max(0, administrative_limit_msv - 投影累计)
 法规余量 = max(0, annual_limit_msv - 投影累计)

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"radiation-dose-budget-control/backend/internal/constants"
+	"radiation-dose-budget-control/backend/internal/dosebudget"
 	"radiation-dose-budget-control/backend/internal/dto"
 	"radiation-dose-budget-control/backend/internal/model"
 	"radiation-dose-budget-control/backend/internal/repository"
@@ -35,15 +36,20 @@ func (service *WorkPermitPlanService) Create(request dto.CreateWorkPermitPlanReq
 	if worker.ProfileStatus != constants.ProfileStatusActive {
 		return dto.WorkPermitPlanResponse{}, Conflict("worker_not_active", "new plans require an active worker profile", nil)
 	}
-	controls, err := normalizeControls(request.Controls)
+	segmentInputs, err := segmentRequests(request.EstimatedRateMSVH, request.PlannedMinutes, request.Controls, request.Segments)
+	if err != nil {
+		return dto.WorkPermitPlanResponse{}, err
+	}
+	segments, projection, controlsJSON, err := normalizeSegments(segmentInputs)
 	if err != nil {
 		return dto.WorkPermitPlanResponse{}, err
 	}
 	plan := model.WorkPermitPlan{
 		PlanCode: strings.ToUpper(strings.TrimSpace(request.PlanCode)), WorkerID: request.WorkerID,
 		WorkArea: strings.TrimSpace(request.WorkArea), TaskCategory: strings.TrimSpace(request.TaskCategory),
-		EstimatedRateMSVH: request.EstimatedRateMSVH, PlannedMinutes: request.PlannedMinutes,
-		ControlsJSON: controls, PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: actor.ID,
+		EstimatedRateMSVH: projection.TimeWeightedRateMSV, PlannedMinutes: sumSegmentMinutes(segments),
+		ControlsJSON: controlsJSON, SegmentsJSON: mustEncodeSegments(segments),
+		PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: actor.ID,
 	}
 	if err := service.plans.Create(&plan); err != nil {
 		if repository.IsUniqueViolation(err) {
@@ -51,7 +57,10 @@ func (service *WorkPermitPlanService) Create(request dto.CreateWorkPermitPlanReq
 		}
 		return dto.WorkPermitPlanResponse{}, Internal("could not create work permit plan", err)
 	}
-	response := planResponse(plan, worker)
+	response, err := planResponse(plan, worker)
+	if err != nil {
+		return dto.WorkPermitPlanResponse{}, err
+	}
 	if err := service.audit.Record(actor, requestID, "plan.created", "work_permit_plan", auditID(plan.ID),
 		map[string]any{"plan_code": plan.PlanCode}, nil, planAudit(plan)); err != nil {
 		return dto.WorkPermitPlanResponse{}, err
@@ -74,7 +83,11 @@ func (service *WorkPermitPlanService) Update(id uint, request dto.UpdateWorkPerm
 	if worker.ProfileStatus != constants.ProfileStatusActive {
 		return dto.WorkPermitPlanResponse{}, Conflict("worker_not_active", "plan worker must have an active profile", nil)
 	}
-	controls, err := normalizeControls(request.Controls)
+	segmentInputs, err := segmentRequests(request.EstimatedRateMSVH, request.PlannedMinutes, request.Controls, request.Segments)
+	if err != nil {
+		return dto.WorkPermitPlanResponse{}, err
+	}
+	segments, projection, controlsJSON, err := normalizeSegments(segmentInputs)
 	if err != nil {
 		return dto.WorkPermitPlanResponse{}, err
 	}
@@ -82,9 +95,10 @@ func (service *WorkPermitPlanService) Update(id uint, request dto.UpdateWorkPerm
 	updated.WorkerID = request.WorkerID
 	updated.WorkArea = strings.TrimSpace(request.WorkArea)
 	updated.TaskCategory = strings.TrimSpace(request.TaskCategory)
-	updated.EstimatedRateMSVH = request.EstimatedRateMSVH
-	updated.PlannedMinutes = request.PlannedMinutes
-	updated.ControlsJSON = controls
+	updated.EstimatedRateMSVH = projection.TimeWeightedRateMSV
+	updated.PlannedMinutes = sumSegmentMinutes(segments)
+	updated.ControlsJSON = controlsJSON
+	updated.SegmentsJSON = mustEncodeSegments(segments)
 	if err := service.plans.Update(updated, request.Version); err != nil {
 		if strings.Contains(err.Error(), repository.ErrVersionConflict.Error()) {
 			return dto.WorkPermitPlanResponse{}, Conflict("version_conflict", "plan changed or left draft state; refresh before updating", err)
@@ -97,7 +111,7 @@ func (service *WorkPermitPlanService) Update(id uint, request dto.UpdateWorkPerm
 		map[string]any{"expected_version": request.Version}, planAudit(before), planAudit(updated)); err != nil {
 		return dto.WorkPermitPlanResponse{}, err
 	}
-	return planResponse(updated, worker), nil
+	return planResponse(updated, worker)
 }
 
 func (service *WorkPermitPlanService) Get(id uint) (dto.WorkPermitPlanResponse, error) {
@@ -109,7 +123,7 @@ func (service *WorkPermitPlanService) Get(id uint) (dto.WorkPermitPlanResponse, 
 	if err != nil {
 		return dto.WorkPermitPlanResponse{}, MapRepositoryError("plan worker", err)
 	}
-	return planResponse(plan, worker), nil
+	return planResponse(plan, worker)
 }
 
 func (service *WorkPermitPlanService) List(page, pageSize int, status, workerFilter string) ([]dto.WorkPermitPlanResponse, dto.PageMeta, error) {
@@ -130,7 +144,11 @@ func (service *WorkPermitPlanService) List(page, pageSize int, status, workerFil
 		if err != nil {
 			return nil, dto.PageMeta{}, MapRepositoryError("plan worker", err)
 		}
-		responses = append(responses, planResponse(plan, worker))
+		response, err := planResponse(plan, worker)
+		if err != nil {
+			return nil, dto.PageMeta{}, err
+		}
+		responses = append(responses, response)
 	}
 	return responses, pageMeta(page, pageSize, total), nil
 }
@@ -159,49 +177,169 @@ func (service *WorkPermitPlanService) Archive(id uint, request dto.PlanVersionRe
 	if err != nil {
 		return dto.WorkPermitPlanResponse{}, MapRepositoryError("plan worker", err)
 	}
-	return planResponse(after, worker), nil
+	return planResponse(after, worker)
 }
 
-func normalizeControls(values []string) (string, error) {
+func segmentRequests(
+	rate *float64,
+	minutes *int,
+	controls []string,
+	segments []dto.PlanSegmentRequest,
+) ([]dto.PlanSegmentRequest, error) {
+	if segments != nil {
+		if len(segments) == 0 {
+			return nil, BadRequest("segments_required", "at least one dose budget segment is required")
+		}
+		return segments, nil
+	}
+	if rate == nil {
+		zeroRate := 0.0
+		rate = &zeroRate
+	}
+	if minutes == nil || len(controls) == 0 {
+		return nil, BadRequest("segments_required", "at least one dose budget segment with controls is required")
+	}
+	legacyRate := *rate
+	legacyMinutes := *minutes
+	return []dto.PlanSegmentRequest{{DoseRateMSVH: &legacyRate, Minutes: &legacyMinutes, Controls: controls}}, nil
+}
+
+func normalizeSegments(values []dto.PlanSegmentRequest) ([]dosebudget.Segment, dosebudget.Projection, string, error) {
+	segments := make([]dosebudget.Segment, 0, len(values))
+	allControls := []string{}
+	seenControls := map[string]bool{}
+	for _, value := range values {
+		controls, err := normalizeControlList(value.Controls)
+		if err != nil {
+			return nil, dosebudget.Projection{}, "", BadRequest("controls_required", "each segment requires at least one concrete exposure control")
+		}
+		for _, control := range controls {
+			key := strings.ToLower(control)
+			if !seenControls[key] {
+				seenControls[key] = true
+				allControls = append(allControls, control)
+			}
+		}
+		if value.DoseRateMSVH == nil || value.Minutes == nil {
+			return nil, dosebudget.Projection{}, "", BadRequest("invalid_plan_segments", "each segment requires a finite dose rate and minute duration")
+		}
+		segments = append(segments, dosebudget.Segment{DoseRateMSVH: *value.DoseRateMSVH, Minutes: *value.Minutes, Controls: controls})
+	}
+	projection, err := dosebudget.CalculateSegmentProjection(0, segments)
+	if err != nil {
+		return nil, dosebudget.Projection{}, "", BadRequest("invalid_plan_segments", err.Error())
+	}
+	controlsJSON, err := json.Marshal(allControls)
+	if err != nil {
+		return nil, dosebudget.Projection{}, "", Internal("could not encode plan controls", err)
+	}
+	return projection.Segments, projection, string(controlsJSON), nil
+}
+
+func normalizeControlList(values []string) ([]string, error) {
 	normalized := make([]string, 0, len(values))
 	seen := map[string]bool{}
 	for _, value := range values {
 		value = strings.TrimSpace(value)
-		if value == "" || seen[strings.ToLower(value)] {
+		if value == "" || len(value) < 2 || len(value) > 160 || seen[strings.ToLower(value)] {
 			continue
 		}
 		seen[strings.ToLower(value)] = true
 		normalized = append(normalized, value)
 	}
 	if len(normalized) == 0 {
-		return "", BadRequest("controls_required", "at least one concrete exposure control is required")
+		return nil, BadRequest("controls_required", "at least one concrete exposure control is required")
 	}
-	encoded, err := json.Marshal(normalized)
-	if err != nil {
-		return "", Internal("could not encode plan controls", err)
-	}
-	return string(encoded), nil
+	return normalized, nil
 }
 
-func planResponse(plan model.WorkPermitPlan, worker model.WorkerProfile) dto.WorkPermitPlanResponse {
+func sumSegmentMinutes(segments []dosebudget.Segment) int {
+	total := 0
+	for _, segment := range segments {
+		total += segment.Minutes
+	}
+	return total
+}
+
+func mustEncodeSegments(segments []dosebudget.Segment) string {
+	encoded, err := json.Marshal(segments)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
+}
+
+func decodePlanSegments(plan model.WorkPermitPlan) ([]dosebudget.Segment, error) {
+	if strings.TrimSpace(plan.SegmentsJSON) == "" {
+		controls := []string{}
+		if err := json.Unmarshal([]byte(plan.ControlsJSON), &controls); err != nil {
+			return nil, Internal("stored plan controls are invalid", err)
+		}
+		projection, err := dosebudget.CalculateProjection(0, plan.EstimatedRateMSVH, plan.PlannedMinutes)
+		if err != nil {
+			return nil, Internal("stored plan dose assumptions are invalid", err)
+		}
+		segment := projection.Segments[0]
+		segment.Controls = controls
+		return []dosebudget.Segment{segment}, nil
+	}
+	segments := []dosebudget.Segment{}
+	if err := json.Unmarshal([]byte(plan.SegmentsJSON), &segments); err != nil {
+		return nil, Internal("stored plan segments are invalid", err)
+	}
+	if len(segments) == 0 {
+		return nil, Internal("stored plan segments are empty", nil)
+	}
+	for _, segment := range segments {
+		if segment.Minutes <= 0 || len(segment.Controls) == 0 {
+			return nil, Internal("stored plan segments are invalid", nil)
+		}
+	}
+	if _, err := dosebudget.CalculateSegmentProjection(0, segments); err != nil {
+		return nil, Internal("stored plan dose assumptions are invalid", err)
+	}
+	return segments, nil
+}
+
+func planResponse(plan model.WorkPermitPlan, worker model.WorkerProfile) (dto.WorkPermitPlanResponse, error) {
+	segments, err := decodePlanSegments(plan)
+	if err != nil {
+		return dto.WorkPermitPlanResponse{}, err
+	}
 	controls := []string{}
-	_ = json.Unmarshal([]byte(plan.ControlsJSON), &controls)
+	segmentResponses := make([]dto.PlanSegmentResponse, 0, len(segments))
+	plannedDose := 0.0
+	seenControls := map[string]bool{}
+	for _, segment := range segments {
+		plannedDose += segment.PlannedDose
+		segmentResponses = append(segmentResponses, dto.PlanSegmentResponse{
+			DoseRateMSVH: segment.DoseRateMSVH, Minutes: segment.Minutes,
+			Controls: segment.Controls, PlannedDoseMSV: segment.PlannedDose,
+		})
+		for _, control := range segment.Controls {
+			key := strings.ToLower(control)
+			if !seenControls[key] {
+				seenControls[key] = true
+				controls = append(controls, control)
+			}
+		}
+	}
 	return dto.WorkPermitPlanResponse{
 		ID: plan.ID, PlanCode: plan.PlanCode, WorkerID: plan.WorkerID, WorkerCode: worker.WorkerCode,
 		WorkerName: worker.DisplayName, WorkArea: plan.WorkArea, TaskCategory: plan.TaskCategory,
 		EstimatedRateMSVH: plan.EstimatedRateMSVH, PlannedMinutes: plan.PlannedMinutes,
-		ProjectedDoseMSV: plan.EstimatedRateMSVH * float64(plan.PlannedMinutes) / 60,
-		Controls:         controls, PermitStatus: plan.PermitStatus, Version: plan.Version,
+		ProjectedDoseMSV: plannedDose, Controls: controls, Segments: segmentResponses,
+		PermitStatus: plan.PermitStatus, Version: plan.Version,
 		ReviewerID: plan.ReviewerID, ReviewNote: plan.ReviewNote, CreatedAt: plan.CreatedAt,
 		UpdatedAt: plan.UpdatedAt, ArchivedAt: plan.ArchivedAt,
-	}
+	}, nil
 }
 
 func planAudit(plan model.WorkPermitPlan) map[string]any {
 	return map[string]any{
 		"id": plan.ID, "plan_code": plan.PlanCode, "worker_id": plan.WorkerID, "work_area": plan.WorkArea,
 		"task_category": plan.TaskCategory, "estimated_rate_msvh": plan.EstimatedRateMSVH,
-		"planned_minutes": plan.PlannedMinutes, "controls": plan.ControlsJSON, "permit_status": plan.PermitStatus,
-		"version": plan.Version, "reviewer_id": plan.ReviewerID,
+		"planned_minutes": plan.PlannedMinutes, "controls": plan.ControlsJSON, "segments": plan.SegmentsJSON,
+		"permit_status": plan.PermitStatus, "version": plan.Version, "reviewer_id": plan.ReviewerID,
 	}
 }

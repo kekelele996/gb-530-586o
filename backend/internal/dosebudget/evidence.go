@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,7 @@ type Snapshot struct {
 	EstimatedRateMSVH      float64   `json:"estimated_rate_msvh"`
 	PlannedMinutes         int       `json:"planned_minutes"`
 	Controls               []string  `json:"controls"`
+	Segments               []Segment `json:"segments"`
 	IncludedExposureIDs    []uint    `json:"included_exposure_ids"`
 	ExcludedExposureIDs    []uint    `json:"excluded_exposure_ids"`
 	AdministrativeLimitMSV float64   `json:"administrative_limit_msv"`
@@ -37,6 +39,7 @@ type Evidence struct {
 	CorrectedChainCount  int       `json:"corrected_chain_count"`
 	Formula              string    `json:"formula"`
 	ProjectionFormula    string    `json:"projection_formula"`
+	Segments             []Segment `json:"segments"`
 	AdministrativeLimit  float64   `json:"administrative_limit_msv"`
 	AnnualLegalLimit     float64   `json:"annual_legal_limit_msv"`
 	NearLegalRatio       float64   `json:"near_legal_ratio"`
@@ -49,6 +52,10 @@ type Evidence struct {
 func BuildArtifacts(snapshot Snapshot, summary PeriodSummary, decision Decision) (string, string, error) {
 	snapshot.Controls = append([]string(nil), snapshot.Controls...)
 	sort.Strings(snapshot.Controls)
+	snapshot.Segments = cloneSegments(snapshot.Segments)
+	for index := range snapshot.Segments {
+		snapshot.Segments[index].Controls = append([]string(nil), snapshot.Segments[index].Controls...)
+	}
 	snapshot.IncludedExposureIDs = append([]uint(nil), summary.IncludedEntryIDs...)
 	snapshot.ExcludedExposureIDs = append([]uint(nil), summary.ExcludedEntryIDs...)
 	evidence := Evidence{
@@ -56,7 +63,8 @@ func BuildArtifacts(snapshot Snapshot, summary PeriodSummary, decision Decision)
 		VerifiedEntryCount: summary.VerifiedEntryCount, ExcludedEntryCount: summary.ExcludedEntryCount,
 		CorrectedChainCount: summary.CorrectedChainCount,
 		Formula:             "period_dose_msv = sum(verified exposure entries, including immutable reversals and replacements)",
-		ProjectionFormula:   "projected_dose_msv = period_dose_msv + estimated_rate_msvh * planned_minutes / 60",
+		ProjectionFormula:   projectionFormula(snapshot.Segments),
+		Segments:            snapshot.Segments,
 		AdministrativeLimit: snapshot.AdministrativeLimitMSV, AnnualLegalLimit: snapshot.LegalLimitMSV,
 		NearLegalRatio: snapshot.NearLegalRatio, ThresholdVersion: snapshot.ThresholdVersion,
 		RequiresManualReview: decision.RequiresManualReview, EscalationReason: decision.EscalationExplanation,
@@ -71,6 +79,24 @@ func BuildArtifacts(snapshot Snapshot, summary PeriodSummary, decision Decision)
 		return "", "", fmt.Errorf("encode assessment evidence: %w", err)
 	}
 	return string(snapshotJSON), string(evidenceJSON), nil
+}
+
+func cloneSegments(segments []Segment) []Segment {
+	cloned := make([]Segment, len(segments))
+	copy(cloned, segments)
+	return cloned
+}
+
+func projectionFormula(segments []Segment) string {
+	terms := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		terms = append(terms, fmt.Sprintf("(%s mSv/h * %d min / 60)", formatNumber(segment.DoseRateMSVH), segment.Minutes))
+	}
+	return "projected_dose_msv = period_dose_msv + " + strings.Join(terms, " + ")
+}
+
+func formatNumber(value float64) string {
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", value), "0"), ".")
 }
 
 func RiskRank(value string) int {

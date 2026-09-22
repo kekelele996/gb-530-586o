@@ -29,6 +29,18 @@ import { DoseBandBadgeComponent } from './dose-band-badge.component';
       </dl>
       <div class="facts">
         <p><strong>Evidence set</strong> {{ assessment.evidence.verified_entry_count }} verified · {{ assessment.evidence.excluded_entry_count }} excluded · {{ assessment.evidence.corrected_chain_count }} correction links</p>
+        <div class="segment-evidence">
+          <strong>Segment budget</strong>
+          <table>
+            <thead><tr><th>#</th><th>Rate</th><th>Minutes</th><th>Increment</th><th>Controls</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let segment of assessment.evidence.segments; let i = index">
+                <td>{{ i + 1 }}</td><td>{{ segment.dose_rate_msvh | number:'1.3-3' }} mSv/h</td><td>{{ segment.minutes }}</td>
+                <td>{{ segment.planned_dose_msv | number:'1.3-3' }} mSv</td><td>{{ segment.controls.join('; ') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p><strong>Formula</strong> {{ assessment.evidence.projection_formula }}</p>
         <p><strong>Threshold</strong> {{ assessment.threshold_version }} · near legal at {{ assessment.evidence.near_legal_ratio | percent:'1.0-0' }}</p>
         <p class="escalation"><strong>Review signal</strong> {{ assessment.evidence.escalation_reason }}</p>
@@ -50,6 +62,12 @@ import { DoseBandBadgeComponent } from './dose-band-badge.component';
     dt { color: var(--muted); font-size: 10px; text-transform: uppercase; } dd { margin: 5px 0 0; font-size: 17px; font-variant-numeric: tabular-nums; }
     .facts { display: grid; gap: 8px; padding: 18px 20px; font-size: 12px; } .facts p { margin: 0; line-height: 1.45; }
     .facts strong { display: inline-block; min-width: 88px; color: var(--muted); }
+    .segment-evidence { border: 1px solid var(--line); background: white; }
+    .segment-evidence > strong { display: block; padding: 8px 10px; border-bottom: 1px solid var(--line); background: #f1f3ef; }
+    .segment-evidence table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .segment-evidence th, .segment-evidence td { padding: 7px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .segment-evidence th { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .segment-evidence tr:last-child td { border-bottom: 0; }
     .escalation { color: #76510b; }
     footer { padding: 11px 20px; background: #fff3c9; border-top: 1px solid #d8b75c; color: #493a13; font-size: 11px; }
     @media (max-width: 720px) { dl { grid-template-columns: 1fr 1fr; } dl div:nth-child(2) { border-right: 0; } .scale { grid-template-columns: 1fr 1fr; } }
