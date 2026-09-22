@@ -28,6 +28,19 @@ export interface WorkerInput {
   period_start: string;
 }
 
+export interface PlanSegment {
+  dose_rate_msvh: number;
+  minutes: number;
+  planned_dose_msv: number;
+  controls: string[];
+}
+
+export interface PlanSegmentInput {
+  dose_rate_msvh: number;
+  minutes: number;
+  controls: string[];
+}
+
 export interface WorkPermitPlan {
   id: number;
   plan_code: string;
@@ -37,9 +50,11 @@ export interface WorkPermitPlan {
   work_area: string;
   task_category: string;
   estimated_rate_msvh: number;
+  time_weighted_rate_msvh: number;
   planned_minutes: number;
   projected_dose_msv: number;
   controls: string[];
+  segments: PlanSegment[];
   permit_status: PermitStatus;
   version: number;
   reviewer_id?: number;
@@ -54,7 +69,8 @@ export interface PlanInput {
   worker_id: number;
   work_area: string;
   task_category: string;
-  estimated_rate_msvh: number;
-  planned_minutes: number;
-  controls: string[];
+  estimated_rate_msvh?: number;
+  planned_minutes?: number;
+  controls?: string[];
+  segments: PlanSegmentInput[];
 }

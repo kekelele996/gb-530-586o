@@ -154,10 +154,17 @@ func seed(db *gorm.DB, cfg Config) error {
 		encoded, _ := json.Marshal(values)
 		return string(encoded)
 	}
+	segment := func(rate float64, minutes int, controls ...string) map[string]any {
+		return map[string]any{"dose_rate_msvh": rate, "minutes": minutes, "controls": controls}
+	}
+	segments := func(values ...map[string]any) string {
+		encoded, _ := json.Marshal(values)
+		return string(encoded)
+	}
 	plans := []model.WorkPermitPlan{
-		{PlanCode: "ALARA-530-A", WorkerID: workers[0].ID, WorkArea: "Turbine annex R-12", TaskCategory: "Shield survey", EstimatedRateMSVH: 0.42, PlannedMinutes: 45, ControlsJSON: controls("temporary shielding", "remote reading", "two-person time check"), PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: planner.ID},
-		{PlanCode: "ALARA-530-B", WorkerID: workers[1].ID, WorkArea: "Hot-cell transfer bay", TaskCategory: "Manipulator inspection", EstimatedRateMSVH: 2.8, PlannedMinutes: 90, ControlsJSON: controls("staged tools", "continuous RPO observation", "abort point at 45 minutes"), PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: planner.ID},
-		{PlanCode: "ALARA-530-C", WorkerID: workers[0].ID, WorkArea: "Waste assay corridor", TaskCategory: "Container verification", EstimatedRateMSVH: 0.18, PlannedMinutes: 60, ControlsJSON: controls("distance markers", "pre-job briefing"), PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: planner.ID},
+		{PlanCode: "ALARA-530-A", WorkerID: workers[0].ID, WorkArea: "Turbine annex R-12", TaskCategory: "Shield survey", EstimatedRateMSVH: 0.42, PlannedMinutes: 45, ControlsJSON: controls("remote reading", "temporary shielding", "two-person time check"), SegmentsJSON: segments(segment(0.6, 15, "temporary shielding"), segment(0.33, 30, "remote reading", "two-person time check")), PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: planner.ID},
+		{PlanCode: "ALARA-530-B", WorkerID: workers[1].ID, WorkArea: "Hot-cell transfer bay", TaskCategory: "Manipulator inspection", EstimatedRateMSVH: 2.8, PlannedMinutes: 90, ControlsJSON: controls("abort point at 45 minutes", "continuous RPO observation", "staged tools"), SegmentsJSON: segments(segment(3.5, 30, "staged tools", "continuous RPO observation"), segment(2.45, 60, "abort point at 45 minutes")), PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: planner.ID},
+		{PlanCode: "ALARA-530-C", WorkerID: workers[0].ID, WorkArea: "Waste assay corridor", TaskCategory: "Container verification", EstimatedRateMSVH: 0.18, PlannedMinutes: 60, ControlsJSON: controls("distance markers", "pre-job briefing"), SegmentsJSON: segments(segment(0.18, 60, "distance markers", "pre-job briefing")), PermitStatus: constants.PermitStatusDraft, Version: 1, CreatedBy: planner.ID},
 	}
 	if err := db.Create(&plans).Error; err != nil {
 		return err

@@ -28,6 +28,15 @@ export interface ExposureInput {
   note: string;
 }
 
+export interface PlanSegmentEvidence {
+  index: number;
+  dose_rate_msvh: number;
+  minutes: number;
+  planned_dose_msv: number;
+  controls: string[];
+  formula: string;
+}
+
 export interface DoseEvidence {
   period_start: string;
   period_end: string;
@@ -36,6 +45,7 @@ export interface DoseEvidence {
   corrected_chain_count: number;
   formula: string;
   projection_formula: string;
+  segment_formulas: PlanSegmentEvidence[];
   administrative_limit_msv: number;
   annual_legal_limit_msv: number;
   near_legal_ratio: number;

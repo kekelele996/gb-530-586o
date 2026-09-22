@@ -11,6 +11,7 @@ type WorkPermitPlan struct {
 	EstimatedRateMSVH float64   `gorm:"not null"`
 	PlannedMinutes    int       `gorm:"not null"`
 	ControlsJSON      string    `gorm:"type:text;not null"`
+	SegmentsJSON      string    `gorm:"type:text;not null;default:'[]'"`
 	PermitStatus      string    `gorm:"size:32;index;not null"`
 	Version           uint      `gorm:"not null;default:1"`
 	ReviewerID        *uint     `gorm:"index"`

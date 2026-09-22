@@ -67,7 +67,8 @@ func (repository *WorkPermitPlanRepository) Update(plan model.WorkPermitPlan, ex
 		Updates(map[string]any{
 			"worker_id": plan.WorkerID, "work_area": plan.WorkArea, "task_category": plan.TaskCategory,
 			"estimated_rate_msvh": plan.EstimatedRateMSVH, "planned_minutes": plan.PlannedMinutes,
-			"controls_json": plan.ControlsJSON, "version": expectedVersion + 1,
+			"controls_json": plan.ControlsJSON, "segments_json": plan.SegmentsJSON,
+			"version": expectedVersion + 1,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("update work permit plan: %w", result.Error)

@@ -19,21 +19,31 @@ type AssessmentReviewRequest struct {
 	Version  uint   `json:"version" validate:"required,gt=0"`
 }
 
+type PlanSegmentEvidence struct {
+	Index        int      `json:"index"`
+	DoseRateMSVH float64  `json:"dose_rate_msvh"`
+	Minutes      int      `json:"minutes"`
+	PlannedDose  float64  `json:"planned_dose_msv"`
+	Controls     []string `json:"controls"`
+	Formula      string   `json:"formula"`
+}
+
 type DoseEvidence struct {
-	PeriodStart          time.Time `json:"period_start"`
-	PeriodEnd            time.Time `json:"period_end"`
-	VerifiedEntryCount   int       `json:"verified_entry_count"`
-	ExcludedEntryCount   int       `json:"excluded_entry_count"`
-	CorrectedChainCount  int       `json:"corrected_chain_count"`
-	Formula              string    `json:"formula"`
-	ProjectionFormula    string    `json:"projection_formula"`
-	AdministrativeLimit  float64   `json:"administrative_limit_msv"`
-	AnnualLegalLimit     float64   `json:"annual_legal_limit_msv"`
-	NearLegalRatio       float64   `json:"near_legal_ratio"`
-	ThresholdVersion     string    `json:"threshold_version"`
-	RequiresManualReview bool      `json:"requires_manual_review"`
-	EscalationReason     string    `json:"escalation_reason"`
-	BoundaryStatement    string    `json:"boundary_statement"`
+	PeriodStart          time.Time             `json:"period_start"`
+	PeriodEnd            time.Time             `json:"period_end"`
+	VerifiedEntryCount   int                   `json:"verified_entry_count"`
+	ExcludedEntryCount   int                   `json:"excluded_entry_count"`
+	CorrectedChainCount  int                   `json:"corrected_chain_count"`
+	Formula              string                `json:"formula"`
+	ProjectionFormula    string                `json:"projection_formula"`
+	SegmentFormulas      []PlanSegmentEvidence `json:"segment_formulas"`
+	AdministrativeLimit  float64               `json:"administrative_limit_msv"`
+	AnnualLegalLimit     float64               `json:"annual_legal_limit_msv"`
+	NearLegalRatio       float64               `json:"near_legal_ratio"`
+	ThresholdVersion     string                `json:"threshold_version"`
+	RequiresManualReview bool                  `json:"requires_manual_review"`
+	EscalationReason     string                `json:"escalation_reason"`
+	BoundaryStatement    string                `json:"boundary_statement"`
 }
 
 type DoseBudgetAssessmentResponse struct {

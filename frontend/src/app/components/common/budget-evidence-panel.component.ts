@@ -30,6 +30,13 @@ import { DoseBandBadgeComponent } from './dose-band-badge.component';
       <div class="facts">
         <p><strong>Evidence set</strong> {{ assessment.evidence.verified_entry_count }} verified · {{ assessment.evidence.excluded_entry_count }} excluded · {{ assessment.evidence.corrected_chain_count }} correction links</p>
         <p><strong>Formula</strong> {{ assessment.evidence.projection_formula }}</p>
+        <div class="segments" *ngIf="assessment.evidence.segment_formulas?.length">
+          <p class="segments-title" *ngFor="let segment of assessment.evidence.segment_formulas">
+            <strong>Segment {{ segment.index }}</strong>
+            <span>{{ segment.formula }}</span>
+            <span class="segment-controls">{{ segment.controls.join(' · ') }}</span>
+          </p>
+        </div>
         <p><strong>Threshold</strong> {{ assessment.threshold_version }} · near legal at {{ assessment.evidence.near_legal_ratio | percent:'1.0-0' }}</p>
         <p class="escalation"><strong>Review signal</strong> {{ assessment.evidence.escalation_reason }}</p>
       </div>
@@ -50,6 +57,10 @@ import { DoseBandBadgeComponent } from './dose-band-badge.component';
     dt { color: var(--muted); font-size: 10px; text-transform: uppercase; } dd { margin: 5px 0 0; font-size: 17px; font-variant-numeric: tabular-nums; }
     .facts { display: grid; gap: 8px; padding: 18px 20px; font-size: 12px; } .facts p { margin: 0; line-height: 1.45; }
     .facts strong { display: inline-block; min-width: 88px; color: var(--muted); }
+    .segments { display: grid; gap: 4px; margin-left: 4px; padding-left: 10px; border-left: 2px solid #c9d3ca; }
+    .segments-title { display: grid; grid-template-columns: 86px 1fr; gap: 6px; }
+    .segments-title strong { color: #286858; }
+    .segment-controls { grid-column: 2; color: var(--muted); font-size: 11px; }
     .escalation { color: #76510b; }
     footer { padding: 11px 20px; background: #fff3c9; border-top: 1px solid #d8b75c; color: #493a13; font-size: 11px; }
     @media (max-width: 720px) { dl { grid-template-columns: 1fr 1fr; } dl div:nth-child(2) { border-right: 0; } .scale { grid-template-columns: 1fr 1fr; } }

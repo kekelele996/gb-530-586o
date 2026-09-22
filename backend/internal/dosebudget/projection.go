@@ -26,8 +26,29 @@ func CalculateProjection(currentDose, estimatedRateMSVH float64, plannedMinutes 
 	}
 	return Projection{
 		CurrentDoseMSV: currentDose, PlannedDoseMSV: roundDose(plannedDose),
-		ProjectedTotalMSV: roundDose(projected), TimeWeightedRateMSV: roundDose(plannedDose),
+		ProjectedTotalMSV: roundDose(projected), TimeWeightedRateMSV: roundDose(estimatedRateMSVH),
 	}, nil
+}
+
+// CalculateSegmentProjection sums the dose contribution of every segment and
+// derives the duration-weighted average rate over the whole plan.
+func CalculateSegmentProjection(currentDose float64, segments []Segment) (Projection, []SegmentDose, error) {
+	if !finite(currentDose) || currentDose < 0 {
+		return Projection{}, nil, fmt.Errorf("%w: doses must be finite and non-negative", ErrInvalidDoseInput)
+	}
+	normalized, err := NormalizeSegments(segments)
+	if err != nil {
+		return Projection{}, nil, err
+	}
+	plannedDose := PlannedDoseFromSegments(normalized)
+	projected := currentDose + plannedDose
+	if !finite(plannedDose) || !finite(projected) {
+		return Projection{}, nil, fmt.Errorf("%w: projection overflow", ErrInvalidDoseInput)
+	}
+	return Projection{
+		CurrentDoseMSV: currentDose, PlannedDoseMSV: plannedDose,
+		ProjectedTotalMSV: roundDose(projected), TimeWeightedRateMSV: TimeWeightedRate(normalized),
+	}, SegmentBreakdown(normalized), nil
 }
 
 func finite(value float64) bool {

@@ -353,7 +353,8 @@ func (service *DoseBudgetAssessmentService) calculate(
 	if err != nil {
 		return model.DoseBudgetAssessment{}, BadRequest("invalid_exposure_chain", err.Error())
 	}
-	projection, err := dosebudget.CalculateProjection(summary.DoseMSV, plan.EstimatedRateMSVH, plan.PlannedMinutes)
+	segments := decodePlanSegments(plan)
+	projection, segmentBreakdown, err := dosebudget.CalculateSegmentProjection(summary.DoseMSV, segments)
 	if err != nil {
 		return model.DoseBudgetAssessment{}, BadRequest("invalid_projection", err.Error())
 	}
@@ -365,19 +366,17 @@ func (service *DoseBudgetAssessmentService) calculate(
 	if err != nil {
 		return model.DoseBudgetAssessment{}, BadRequest("invalid_thresholds", err.Error())
 	}
-	controls := []string{}
-	if err := json.Unmarshal([]byte(plan.ControlsJSON), &controls); err != nil {
-		return model.DoseBudgetAssessment{}, Internal("stored plan controls are invalid", err)
-	}
+	controls := dosebudget.CombinedControls(segments)
 	snapshot := dosebudget.Snapshot{
 		WorkerID: worker.ID, WorkerCode: worker.WorkerCode, WorkerVersion: worker.Version,
 		PlanID: plan.ID, PlanCode: plan.PlanCode, PlanVersion: plan.Version,
-		PeriodStart: period.Start, PeriodEnd: period.End, EstimatedRateMSVH: plan.EstimatedRateMSVH,
-		PlannedMinutes: plan.PlannedMinutes, Controls: controls,
+		PeriodStart: period.Start, PeriodEnd: period.End,
+		EstimatedRateMSVH: projection.TimeWeightedRateMSV, TimeWeightedRateMSVH: projection.TimeWeightedRateMSV,
+		PlannedMinutes: dosebudget.TotalSegmentMinutes(segments), Segments: segments, Controls: controls,
 		AdministrativeLimitMSV: worker.AdministrativeLimitMSV, LegalLimitMSV: worker.AnnualLimitMSV,
 		NearLegalRatio: service.nearRatio, ThresholdVersion: service.thresholdVersion,
 	}
-	snapshotJSON, evidenceJSON, err := dosebudget.BuildArtifacts(snapshot, summary, decision)
+	snapshotJSON, evidenceJSON, err := dosebudget.BuildArtifacts(snapshot, summary, decision, segmentBreakdown)
 	if err != nil {
 		return model.DoseBudgetAssessment{}, Internal("could not build assessment evidence", err)
 	}

@@ -46,7 +46,7 @@ docker compose down -v --remove-orphans
 - 人员概况：维护人员编号、授权级别、行政控制值、法规规划限值、统计周期和乐观锁版本。
 - 暴露台账：新记录先进入 `pending`；RPO 核验后才能计入期间累计。
 - 不可变更正：原值禁止覆盖；一次更正事务创建负值 reversal 和新 replacement，完整保留链路。
-- 作业计划：使用统一 mSv/mSv/h 单位维护剂量率、分钟数和具体控制措施。
+- 作业计划：按分段剂量预算维护每段剂量率（mSv/h）、分钟数和该段控制措施；段数可增删，回写时长加权率、总时长与各段剂量合计。
 - 剂量评估：冻结人员/计划版本、期间记录 ID、公式、阈值版本和控制措施，结果追加写入而非覆盖。
 - 情景比较：对同一人员的多个计划做时间加权投影并比较风险带，不落库、不改变状态。
 - 人工状态机：`draft -> assessed -> pending_rpo_review -> planning_accepted | rejected -> archived`。
@@ -57,13 +57,17 @@ docker compose down -v --remove-orphans
 所有剂量统一使用 `mSv`，剂量率使用 `mSv/h`：
 
 ```text
-计划增量 = estimated_rate_msvh × planned_minutes ÷ 60
+计划增量 = Σ(dose_rate_msvh × minutes ÷ 60)，按各分段求和
+时长加权率 = 计划增量 × 60 ÷ Σ 各段分钟数
 投影累计 = 期间已核验剂量合计 + 计划增量
 行政余量 = max(0, administrative_limit_msv - 投影累计)
 法规余量 = max(0, annual_limit_msv - 投影累计)
 ```
 
 - 期间采用半开区间 `[period_start, period_end)`，边界有表驱动测试。
+- 作业计划以 `segments` 数组承载分段预算，每段含 `dose_rate_msvh`、`minutes`、`controls`；表单可增删分段，接口回写时长加权率、总时长与各段剂量合计。
+- 分段为空、任一段措施为空、总时长超过 1440 分钟或数值越界（率 0~1000 mSv/h）一律拒绝；省略 `segments` 的旧请求和缺少 `segments` 的旧计划按原字段回退为单段，不会失效。
+- 评估输入快照与证据（`segment_formulas`）逐段列出剂量率、分钟数、增量公式和措施。
 - 仅 `quality_flag=verified` 的记录参与汇总；pending/rejected 会写入排除证据。
 - 更正链按原始值 + reversal + replacement 求和，链循环、跨人员关联和重复 `source_ref` 会被拒绝。
 - `near_legal` 默认从法规限值的 90% 开始；阈值版本默认 `ALARA-2026.1`。
